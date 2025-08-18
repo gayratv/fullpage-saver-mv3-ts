@@ -263,7 +263,10 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
     if (msg?.type === "START_CAPTURE" && typeof msg.tabId === "number") {
         runCapture(msg.tabId, msg.opts as StartOpts)
             .then(() => sendResponse({ ok: true }))
-            .catch(e => sendResponse({ ok: false, error: String(e) }));
+            .catch(e => {
+                console.error("runCapture error:", e);
+                sendResponse({ ok: false, error: String(e) });
+            });
         return true; // async
     }
 });
