@@ -1,10 +1,8 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
-// Финальная логика: прокрутка для загрузки + Debugger API
+// Финальная логика: загрузка и выполнение скрипта поиска из файла
 
 import type { StartOpts } from "./types";
-
-console.debug("service worker start", { version: chrome.runtime.getManifest().version });
 
 function sanitize(name?: string): string {
     return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
@@ -30,54 +28,43 @@ function sendDebuggerCommand(target: chrome.debugger.Debuggee, method: string, p
 async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     console.debug("runCapture start", { tabId, opts });
     const tab = await chrome.tabs.get(tabId);
-    console.debug("tab info", { url: tab.url, title: tab.title });
-
     const debuggee = { tabId: tabId };
     const protocolVersion = "1.3";
 
     try {
-        // 1. Подключаем отладчик к вкладке
         await chrome.debugger.attach(debuggee, protocolVersion);
         console.debug("Debugger attached");
-
-        // --- НОВАЯ ЛОГИКА: ПРОКРУТКА ДЛЯ ЗАГРУЗКИ КОНТЕНТА ---
         setBadgeProgress(25);
-        console.debug("Scrolling to bottom to trigger lazy loading...");
-        await sendDebuggerCommand(debuggee, "Runtime.evaluate", {
-            expression: "window.scrollTo(0, document.body.scrollHeight)",
-            awaitPromise: true,
-        });
-        // Даем время на подгрузку
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        console.debug("Scrolling back to top...");
-        await sendDebuggerCommand(debuggee, "Runtime.evaluate", {
-            expression: "window.scrollTo(0, 0)",
-            awaitPromise: true,
-        });
-        // ----------------------------------------------------
 
-        // 2. Получаем размеры всей страницы (теперь уже с подгруженным контентом)
-        const { contentSize } = await sendDebuggerCommand(debuggee, "Page.getLayoutMetrics") as { contentSize: { width: number, height: number }};
-        console.debug("Layout metrics after scroll", contentSize);
+        // 2. НОВАЯ ЛОГИКА: Загружаем и выполняем скрипт поиска из файла
+        const findElementUrl = chrome.runtime.getURL('content/findElement.js');
+        const response = await fetch(findElementUrl);
+        const findElementCode = await response.text();
 
-        if (contentSize.height === 0) {
-            throw new Error("Не удалось определить высоту страницы. Возможно, страница еще загружается.");
+        const { result: { value: elementMetrics } } = await sendDebuggerCommand(debuggee, "Runtime.evaluate", {
+            expression: `${findElementCode}; findTargetElement();`, // Выполняем код и сразу вызываем функцию
+            returnByValue: true,
+        });
+
+        if (!elementMetrics) {
+            throw new Error("Не удалось найти целевой контейнер (результат из findElement.js пустой).");
         }
 
+        console.debug("Container metrics found via fetched script:", elementMetrics);
         setBadgeProgress(50);
 
-        // 3. Делаем скриншот всей страницы за один раз
+        // 3. Делаем скриншот ТОЛЬКО этой области
         const screenshotResult = await sendDebuggerCommand(debuggee, "Page.captureScreenshot", {
             format: opts.format === "png" ? "png" : "jpeg",
             quality: opts.format === "jpeg" ? Math.round(opts.quality * 100) : undefined,
             clip: {
-                x: 0,
-                y: 0,
-                width: contentSize.width,
-                height: contentSize.height,
+                x: elementMetrics.x,
+                y: elementMetrics.y,
+                width: elementMetrics.width,
+                height: elementMetrics.height,
                 scale: 1,
             },
-            captureBeyondViewport: true, // <-- Ключевой параметр!
+            captureBeyondViewport: true,
         }) as { data: string };
 
         console.debug("Screenshot captured");
@@ -102,11 +89,9 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
 
     } catch (e) {
         console.error("Capture failed:", e);
-        // Уведомление для пользователя об ошибке
         await chrome.scripting.executeScript({
             target: { tabId },
             func: (message: string) => {
-                // Используем стилизованный блок вместо alert
                 const errorBox = document.createElement('div');
                 errorBox.style.position = 'fixed';
                 errorBox.style.top = '20px';

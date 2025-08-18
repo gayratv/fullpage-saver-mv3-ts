@@ -6,17 +6,36 @@ import path from "node:path";
 const outdir = "dist";
 await mkdir(outdir, { recursive: true });
 
-// 1) Бандлим TS → dist/*.js
+// 1) Бандлим фоновый скрипт (обязательно как ES Module)
 await build({
     entryPoints: {
         background: "src/background.ts",
-        popup:      "src/popup.ts",
     },
     bundle: true,
     format: "esm",
     outdir,
     sourcemap: true,
 });
+
+// 2) Бандлим скрипт для popup (как IIFE)
+await build({
+    entryPoints: {
+        popup: "src/popup.ts",
+    },
+    bundle: true,
+    format: "iife",
+    outdir,
+    sourcemap: true,
+});
+
+// 3) Просто компилируем findElement.ts без бандлинга, чтобы избежать tree-shaking
+await build({
+    entryPoints: ["src/content/findElement.ts"],
+    outfile: "dist/content/findElement.js",
+    sourcemap: true,
+    // 'bundle: true' здесь отсутствует намеренно
+});
+
 
 // утилита: фиксим ссылки на скрипты в HTML
 function fixHtmlScripts(html, map = {}) {
@@ -27,7 +46,7 @@ function fixHtmlScripts(html, map = {}) {
     return s;
 }
 
-// 2) popup.html
+// 4) popup.html
 {
     const popupHtmlSrc = "src/static/popup.html";
     let html = await readFile(popupHtmlSrc, "utf8");
@@ -37,7 +56,7 @@ function fixHtmlScripts(html, map = {}) {
     await writeFile(path.join(outdir, "popup.html"), html, "utf8");
 }
 
-// 3) manifest.json → правим пути
+// 5) manifest.json → правим пути
 {
     const raw = await readFile("src/static/manifest.json", "utf8");
     const m = JSON.parse(raw);
@@ -67,7 +86,7 @@ function fixHtmlScripts(html, map = {}) {
     await writeFile(path.join(outdir, "manifest.json"), JSON.stringify(m, null, 2), "utf8");
 }
 
-// 4) (опционально) иконки/ассеты
+// 6) (опционально) иконки/ассеты
 try { await cp("src/static/icons", path.join(outdir, "icons"), { recursive: true }); } catch {}
 
 console.log("✅ Build complete → dist/");

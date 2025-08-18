@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Тестирование findElement.js</title>
+</head>
+<body>
+
+<h1>Страница для теста</h1>
+<div id="other-content">Какой-то другой контент</div>
+
+<!-- Имитируем структуру целевой страницы -->
+<div id="page-container"></div>
+<div class="some-class" style="width: 800px; height: 2000px; border: 2px solid red; margin: 10px;">
+    Это целевой элемент для скриншота
+</div>
+
+<!-- Подключаем наш скомпилированный скрипт -->
+<script src="dist/content/findElement.js"></script>
+
+<script>
+    // Теперь мы можем просто вызвать нашу функцию и посмотреть результат в консоли
+    console.log('--- Запускаем тест ---');
+    const metrics = findTargetElement();
+    console.log('Результат выполнения:', metrics);
+
+    if (metrics) {
+        alert('Элемент найден! Размеры: ' + metrics.width + 'x' + metrics.height);
+    } else {
+        alert('Элемент НЕ найден!');
+    }
+</script>
+
+</body>
+</html>
