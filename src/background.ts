@@ -166,12 +166,13 @@ async function scrollToY(tabId: number, y: number): Promise<void> {
                 el.scrollTop = top;
             } else {
                 document.documentElement.scrollTop = top;
-                document.body && (document.body.scrollTop = top);
+                if (document.body)
+                    {document.body.scrollTop = top};
                 window.scrollTo(0, top);
             }
             // Дадим странице дорисоваться: двойной rAF + микропаузa для lazy-load/виртуализации
             await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 550));
         },
         args: [y],
     });
@@ -209,8 +210,10 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     for (let i = 0; i < plan.stops.length; i++) {
         const y = plan.stops[i];
         await scrollToY(tabId, y);
-        // небольшая дополнительная пауза — иногда помогает с «дерганьем» лэйаута
-        await new Promise(r => setTimeout(r, 150));
+
+        // Увеличиваем паузу здесь, чтобы не превышать квоту
+        await new Promise(r => setTimeout(r, 550));
+
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
         tiles.push({ y, dataUrl });
         console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
