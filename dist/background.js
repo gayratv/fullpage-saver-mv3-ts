@@ -1,6 +1,6 @@
 // src/background.ts
 function sanitize(name) {
-  return (name || "page").replace(/[\\/:*?\"<>|]+/g, "_").trim().slice(0, 100) || "page";
+  return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
 }
 function ts() {
   return (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
@@ -9,52 +9,23 @@ var creatingOffscreen = null;
 async function ensureOffscreen(path = "offscreen.html") {
   const url = chrome.runtime.getURL(path);
   try {
-    const contexts = await chrome.runtime.getContexts?.({
+    const ctxs = await chrome.runtime.getContexts?.({
       contextTypes: ["OFFSCREEN_DOCUMENT"],
       documentUrls: [url]
     });
-    if (contexts && contexts.length) return;
+    if (ctxs && ctxs.length) return;
   } catch {
   }
   if (!creatingOffscreen) {
     creatingOffscreen = chrome.offscreen.createDocument({
       url: path,
       reasons: ["BLOBS"],
-      justification: "Stitch captured frames via Canvas and export to image"
+      // нам нужен Canvas/Blob для склейки и кодирования
+      justification: "Stitch captured frames via Canvas and export as image"
     });
   }
   await creatingOffscreen;
   creatingOffscreen = null;
-}
-async function getPlan(tabId) {
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
-      const dpr = self.devicePixelRatio || 1;
-      const vw = innerWidth, vh = innerHeight;
-      const sw = Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0, vw);
-      const sh = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, vh);
-      const overlap = Math.min(64, Math.floor(vh * 0.08));
-      const step = Math.max(1, vh - overlap);
-      const stops = [];
-      for (let y = 0; y < sh; y += step) {
-        const pos = Math.min(y, sh - vh);
-        if (!stops.length || stops[stops.length - 1] !== pos) stops.push(pos);
-        if (y + vh >= sh) break;
-      }
-      return { dpr, vw, vh, sw, sh, overlap, step, stops };
-    }
-  });
-  return result;
-}
-async function scrollToY(tabId, y) {
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (top) => {
-      window.scrollTo(0, top);
-    },
-    args: [y]
-  });
 }
 async function toggleSticky(tabId, enable) {
   await chrome.scripting.executeScript({
@@ -80,24 +51,112 @@ async function toggleSticky(tabId, enable) {
     args: [enable]
   });
 }
+async function initScrollTarget(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      if (window.__fpsScrollInited) return;
+      window.__fpsScrollInited = true;
+      function isScrollable(el) {
+        const cs = getComputedStyle(el);
+        const oy = cs.overflowY;
+        return (oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight;
+      }
+      const candidates = /* @__PURE__ */ new Set();
+      if (document.scrollingElement) candidates.add(document.scrollingElement);
+      if (document.documentElement) candidates.add(document.documentElement);
+      if (document.body) candidates.add(document.body);
+      document.querySelectorAll("*").forEach((el) => {
+        if (isScrollable(el)) candidates.add(el);
+      });
+      let target = document.scrollingElement || document.documentElement || document.body;
+      let maxH = target.scrollHeight || 0;
+      candidates.forEach((el) => {
+        const h = el.scrollHeight || 0;
+        if (h > maxH) {
+          maxH = h;
+          target = el;
+        }
+      });
+      target.setAttribute("data-fps-scroll-target", "1");
+      window.__fpsScrollSelector = '[data-fps-scroll-target="1"]';
+      const id = "__fps_scroll_style__";
+      if (!document.getElementById(id)) {
+        const st = document.createElement("style");
+        st.id = id;
+        st.textContent = `*{scroll-behavior:auto!important}`;
+        document.documentElement.appendChild(st);
+      }
+    }
+  });
+}
+async function getPlan(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const sel = window.__fpsScrollSelector || "[data-fps-scroll-target='1']";
+      const el = document.querySelector(sel);
+      const dpr = self.devicePixelRatio || 1;
+      const vw = innerWidth;
+      const vh = el ? el.clientHeight : innerHeight;
+      const sw = el ? el.scrollWidth : innerWidth;
+      const sh = el ? el.scrollHeight : Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, innerHeight);
+      const overlap = Math.min(64, Math.floor(vh * 0.08));
+      const step = Math.max(1, vh - overlap);
+      const stops = [];
+      for (let y = 0; y < sh; y += step) {
+        const pos = Math.min(y, sh - vh);
+        if (!stops.length || stops[stops.length - 1] !== pos) stops.push(pos);
+        if (y + vh >= sh) break;
+      }
+      return { dpr, vw, vh, sw, sh, overlap, step, stops };
+    }
+  });
+  if (!result) {
+    throw new Error("getPlan: script did not return a Plan");
+  }
+  return result;
+}
+async function scrollToY(tabId, y) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (top) => {
+      const sel = window.__fpsScrollSelector || "[data-fps-scroll-target='1']";
+      const el = document.querySelector(sel);
+      if (el) {
+        el.scrollTop = top;
+      } else {
+        document.documentElement.scrollTop = top;
+        document.body && (document.body.scrollTop = top);
+        window.scrollTo(0, top);
+      }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise((r) => setTimeout(r, 150));
+    },
+    args: [y]
+  });
+}
 async function captureVisible(windowId, format, quality) {
-  const opts = format === "png" ? { format: "png" } : { format: "jpeg", quality: Math.round((quality || 0.92) * 100) };
-  return chrome.tabs.captureVisibleTab(windowId, opts);
+  return chrome.tabs.captureVisibleTab(windowId, {
+    format: format === "png" ? "png" : "jpeg",
+    quality: format === "png" ? void 0 : Math.round((quality || 0.92) * 100)
+  });
 }
 function setBadgeProgress(percent) {
-  chrome.action.setBadgeBackgroundColor({ color: "#0b57d0" });
-  chrome.action.setBadgeText({ text: String(percent) });
+  void chrome.action.setBadgeBackgroundColor({ color: "#0b57d0" });
+  void chrome.action.setBadgeText({ text: String(percent) });
 }
 async function runCapture(tabId, opts) {
   const tab = await chrome.tabs.get(tabId);
   await ensureOffscreen();
+  await initScrollTarget(tabId);
   const plan = await getPlan(tabId);
   if (opts.hideSticky) await toggleSticky(tabId, true);
   const tiles = [];
   for (let i = 0; i < plan.stops.length; i++) {
     const y = plan.stops[i];
     await scrollToY(tabId, y);
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 150));
     const dataUrl = await captureVisible(tab.windowId, opts.format, opts.quality);
     tiles.push({ y, dataUrl });
     const pct = Math.min(99, Math.floor((i + 1) / plan.stops.length * 100));
@@ -131,9 +190,9 @@ async function runCapture(tabId, opts) {
     url: stitched,
     filename,
     conflictAction: opts.saveAs ? "prompt" : "uniquify",
-    saveAs: !!opts.saveAs
+    saveAs: opts.saveAs
   });
-  chrome.action.setBadgeText({ text: "" });
+  void chrome.action.setBadgeText({ text: "" });
   if (opts.hideSticky) await toggleSticky(tabId, false);
 }
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

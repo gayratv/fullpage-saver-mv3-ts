@@ -1,9 +1,7 @@
 // src/offscreen.ts
 /* global OffscreenCanvas */
-type Plan = {
-  dpr: number; vw: number; vh: number; sw: number; sh: number; overlap: number; step: number; stops: number[];
-};
-type Tile = { y: number; dataUrl: string };
+
+import type { Plan, Tile } from "./types";
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
