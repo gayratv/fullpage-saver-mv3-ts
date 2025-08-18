@@ -9,8 +9,10 @@ function loadImage(src) {
 }
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "stitch") return;
+  console.debug("offscreen connected");
   port.onMessage.addListener(async (msg) => {
     if (msg?.type !== "stitch") return;
+    console.debug("offscreen received", { tiles: msg.tiles?.length });
     const { plan, tiles, fileType = "image/jpeg", quality = 0.92 } = msg;
     try {
       if (!tiles?.length) throw new Error("No tiles");
@@ -44,6 +46,7 @@ chrome.runtime.onConnect.addListener((port) => {
         }
       }
       const dataUrl = await toDataURLFromCanvas(canvas, fileType, quality);
+      console.debug("offscreen stitched", { length: dataUrl.length });
       port.postMessage({ type: "stitched", dataUrl });
     } catch (e) {
       console.error("Stitch error", e);

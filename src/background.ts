@@ -4,6 +4,8 @@
 import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
 
 
+console.debug("service worker start", { version: chrome.runtime.getManifest().version });
+
 function sanitize(name?: string): string {
     return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
 }
@@ -189,13 +191,19 @@ function setBadgeProgress(percent: number): void {
 }
 
 async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
+    console.debug("runCapture start", { tabId, opts });
     const tab = await chrome.tabs.get(tabId);
+    console.debug("tab info", { url: tab.url, title: tab.title, windowId: tab.windowId });
 
     await ensureOffscreen();
+    console.debug("offscreen ensured");
     await initScrollTarget(tabId);
+    console.debug("scroll target initialized");
     const plan = await getPlan(tabId);
+    console.debug("capture plan", plan);
 
     if (opts.hideSticky) await toggleSticky(tabId, true);
+    console.debug("hideSticky", opts.hideSticky);
 
     const tiles: Tile[] = [];
     for (let i = 0; i < plan.stops.length; i++) {
@@ -205,10 +213,12 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         await new Promise(r => setTimeout(r, 150));
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
         tiles.push({ y, dataUrl });
+        console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
         const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
         setBadgeProgress(pct);
     }
 
+    console.debug("stitching tiles", tiles.length);
     // Stitch в offscreen
     const stitched: string = await new Promise((resolve, reject) => {
         const port = chrome.runtime.connect({ name: "stitch" });
@@ -225,12 +235,14 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             quality: opts.quality ?? 0.92,
         });
     });
+    console.debug("stitching done", { length: stitched.length });
 
     // Сохранение
     const u = new URL(tab.url || "https://example.com");
     const nameBase = sanitize(`${u.hostname}_${tab.title || "page"}`);
     const ext = opts.format === "png" ? "png" : "jpg";
     const filename = `${nameBase}_${ts()}.${ext}`;
+    console.debug("initiating download", filename);
 
     await chrome.downloads.download({
         url: stitched,
@@ -238,13 +250,16 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         conflictAction: opts.saveAs ? "prompt" : "uniquify",
         saveAs: opts.saveAs,
     });
+    console.debug("download triggered", filename);
 
     void  chrome.action.setBadgeText({ text: "" });
     if (opts.hideSticky) await toggleSticky(tabId, false);
+    console.debug("runCapture finished");
 }
 
 // Слушаем команду из popup
 chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
+    console.debug("onMessage", msg);
     if (msg?.type === "START_CAPTURE" && typeof msg.tabId === "number") {
         runCapture(msg.tabId, msg.opts as StartOpts)
             .then(() => sendResponse({ ok: true }))
