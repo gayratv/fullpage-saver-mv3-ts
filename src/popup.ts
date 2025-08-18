@@ -14,6 +14,8 @@ q.addEventListener("input", () => (qv.textContent = q.value));
     hideSticky: (document.getElementById("hideSticky") as HTMLInputElement).checked
   };
   (document.getElementById("start") as HTMLButtonElement).disabled = true;
+  // eslint-disable-next-line no-console
+  console.debug("popup start", { tabId: tab.id, opts });
   try {
     await chrome.runtime.sendMessage({ type: "START_CAPTURE", tabId: tab.id, opts });
     window.close();
