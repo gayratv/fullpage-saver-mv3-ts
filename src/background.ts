@@ -132,16 +132,17 @@ async function getPlan(tabId: number): Promise<Plan> {
                 ? el.scrollHeight
                 : Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, innerHeight);
 
-            // перекрытие ~8% вьюпорта, максимум 64px, чтобы сгладить швы/липкие элементы
             const overlap = Math.min(64, Math.floor(vh * 0.08));
             const step = Math.max(1, vh - overlap);
 
-            const stops: number[] = [];
-            for (let y = 0; y < sh; y += step) {
-                const pos = Math.min(y, sh - vh);
-                if (!stops.length || stops[stops.length - 1] !== pos) stops.push(pos);
-                if (y + vh >= sh) break;
+            // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+            const stops: number[] = [0];
+            let lastPos = 0;
+            while (lastPos < sh - vh) {
+                lastPos += step;
+                stops.push(Math.min(lastPos, sh - vh));
             }
+            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
             return { dpr, vw, vh, sw, sh, overlap, step, stops };
         },
@@ -150,8 +151,8 @@ async function getPlan(tabId: number): Promise<Plan> {
         throw new Error("getPlan: script did not return a Plan");
     }
     return result;
-
 }
+
 
 /**
  * Скроллим найденный контейнер (или window как fallback) и ждём стабильной отрисовки
