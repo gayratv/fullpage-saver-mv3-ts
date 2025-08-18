@@ -4,6 +4,8 @@
 import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
 
 
+console.debug("service worker start", { version: chrome.runtime.getManifest().version });
+
 function sanitize(name?: string): string {
     return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
 }
