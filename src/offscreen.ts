@@ -14,8 +14,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "stitch") return;
+  // eslint-disable-next-line no-console
+  console.debug("offscreen connected");
   port.onMessage.addListener(async (msg) => {
     if (msg?.type !== "stitch") return;
+    // eslint-disable-next-line no-console
+    console.debug("offscreen received", { tiles: msg.tiles?.length });
     const { plan, tiles, fileType = "image/jpeg", quality = 0.92 } = msg as {
       plan: Plan; tiles: Tile[]; fileType: string; quality: number;
     };
@@ -54,6 +58,8 @@ chrome.runtime.onConnect.addListener((port) => {
       }
 
       const dataUrl = await toDataURLFromCanvas(canvas, fileType, quality);
+      // eslint-disable-next-line no-console
+      console.debug("offscreen stitched", { length: dataUrl.length });
       port.postMessage({ type: "stitched", dataUrl });
     } catch (e: any) {
       console.error("Stitch error", e);

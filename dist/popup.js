@@ -11,6 +11,7 @@ document.getElementById("start").addEventListener("click", async () => {
     hideSticky: document.getElementById("hideSticky").checked
   };
   document.getElementById("start").disabled = true;
+  console.debug("popup start", { tabId: tab.id, opts });
   try {
     await chrome.runtime.sendMessage({ type: "START_CAPTURE", tabId: tab.id, opts });
     window.close();
