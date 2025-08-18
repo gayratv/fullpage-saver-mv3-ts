@@ -1,19 +1,21 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
 
-import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
+import type {CaptureFormat, Plan, Tile, StartOpts} from "./types";
 
 
-console.debug("service worker start", { version: chrome.runtime.getManifest().version });
+console.debug("service worker start", {version: chrome.runtime.getManifest().version});
 
 function sanitize(name?: string): string {
     return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
 }
+
 function ts(): string {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 let creatingOffscreen: Promise<void> | null = null;
+
 async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
     const url = chrome.runtime.getURL(path);
     try {
@@ -41,7 +43,7 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
  */
 async function toggleSticky(tabId: number, enable: boolean): Promise<void> {
     await chrome.scripting.executeScript({
-        target: { tabId },
+        target: {tabId},
         func: (on: boolean) => {
             const id = "__fps_hide_sticky_style__";
             let el = document.getElementById(id) as HTMLStyleElement | null;
@@ -72,7 +74,7 @@ async function toggleSticky(tabId: number, enable: boolean): Promise<void> {
  */
 async function initScrollTarget(tabId: number): Promise<void> {
     await chrome.scripting.executeScript({
-        target: { tabId },
+        target: {tabId},
         func: () => {
             if ((window as any).__fpsScrollInited) return;
             (window as any).__fpsScrollInited = true;
@@ -86,8 +88,8 @@ async function initScrollTarget(tabId: number): Promise<void> {
 
             const candidates = new Set<Element>();
             if (document.scrollingElement) candidates.add(document.scrollingElement);
-            if (document.documentElement)  candidates.add(document.documentElement);
-            if (document.body)             candidates.add(document.body);
+            if (document.documentElement) candidates.add(document.documentElement);
+            if (document.body) candidates.add(document.body);
             document.querySelectorAll<HTMLElement>("*").forEach(el => {
                 if (isScrollable(el)) candidates.add(el);
             });
@@ -96,7 +98,10 @@ async function initScrollTarget(tabId: number): Promise<void> {
             let maxH = target.scrollHeight || 0;
             candidates.forEach((el: any) => {
                 const h = el.scrollHeight || 0;
-                if (h > maxH) { maxH = h; target = el; }
+                if (h > maxH) {
+                    maxH = h;
+                    target = el;
+                }
             });
 
             target.setAttribute("data-fps-scroll-target", "1");
@@ -118,8 +123,8 @@ async function initScrollTarget(tabId: number): Promise<void> {
  * Планируем шаги прокрутки по реальному контейнеру
  */
 async function getPlan(tabId: number): Promise<Plan> {
-    const [{ result }] = await chrome.scripting.executeScript<[], Plan>({
-        target: { tabId },
+    const [{result}] = await chrome.scripting.executeScript<[], Plan>({
+        target: {tabId},
         func: () => {
             const sel = (window as any).__fpsScrollSelector || "[data-fps-scroll-target='1']";
             const el = document.querySelector(sel) as HTMLElement | null;
@@ -144,7 +149,7 @@ async function getPlan(tabId: number): Promise<Plan> {
             }
             // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
-            return { dpr, vw, vh, sw, sh, overlap, step, stops };
+            return {dpr, vw, vh, sw, sh, overlap, step, stops};
         },
     });
     if (!result) {
@@ -159,7 +164,7 @@ async function getPlan(tabId: number): Promise<Plan> {
  */
 async function scrollToY(tabId: number, y: number): Promise<void> {
     await chrome.scripting.executeScript({
-        target: { tabId },
+        target: {tabId},
         func: async (top: number) => {
             const sel = (window as any).__fpsScrollSelector || "[data-fps-scroll-target='1']";
             const el = document.querySelector(sel) as HTMLElement | null;
@@ -167,8 +172,10 @@ async function scrollToY(tabId: number, y: number): Promise<void> {
                 el.scrollTop = top;
             } else {
                 document.documentElement.scrollTop = top;
-                if (document.body)
-                    {document.body.scrollTop = top};
+                if (document.body) {
+                    document.body.scrollTop = top;
+                }
+
                 window.scrollTo(0, top);
             }
             // Дадим странице дорисоваться: двойной rAF + микропаузa для lazy-load/виртуализации
@@ -188,14 +195,14 @@ async function captureVisible(windowId: number, format: CaptureFormat, quality: 
 }
 
 function setBadgeProgress(percent: number): void {
-    void chrome.action.setBadgeBackgroundColor({ color: "#0b57d0" });
-    void chrome.action.setBadgeText({ text: String(percent) });
+    void chrome.action.setBadgeBackgroundColor({color: "#0b57d0"});
+    void chrome.action.setBadgeText({text: String(percent)});
 }
 
 async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
-    console.debug("runCapture start", { tabId, opts });
+    console.debug("runCapture start", {tabId, opts});
     const tab = await chrome.tabs.get(tabId);
-    console.debug("tab info", { url: tab.url, title: tab.title, windowId: tab.windowId });
+    console.debug("tab info", {url: tab.url, title: tab.title, windowId: tab.windowId});
 
     await ensureOffscreen();
     console.debug("offscreen ensured");
@@ -216,7 +223,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         await new Promise(r => setTimeout(r, 550));
 
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
-        tiles.push({ y, dataUrl });
+        tiles.push({y, dataUrl});
         console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
         const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
         setBadgeProgress(pct);
@@ -225,11 +232,16 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     console.debug("stitching tiles", tiles.length);
     // Stitch в offscreen
     const stitched: string = await new Promise((resolve, reject) => {
-        const port = chrome.runtime.connect({ name: "stitch" });
+        const port = chrome.runtime.connect({name: "stitch"});
         const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
         port.onMessage.addListener((msg: any) => {
-            if (msg?.type === "stitched" && msg.dataUrl) { clearTimeout(timeout); resolve(msg.dataUrl); }
-            else if (msg?.type === "error") { clearTimeout(timeout); reject(new Error(msg.message)); }
+            if (msg?.type === "stitched" && msg.dataUrl) {
+                clearTimeout(timeout);
+                resolve(msg.dataUrl);
+            } else if (msg?.type === "error") {
+                clearTimeout(timeout);
+                reject(new Error(msg.message));
+            }
         });
         port.postMessage({
             type: "stitch",
@@ -239,7 +251,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             quality: opts.quality ?? 0.92,
         });
     });
-    console.debug("stitching done", { length: stitched.length });
+    console.debug("stitching done", {length: stitched.length});
 
     // Сохранение
     const u = new URL(tab.url || "https://example.com");
@@ -256,7 +268,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     });
     console.debug("download triggered", filename);
 
-    void  chrome.action.setBadgeText({ text: "" });
+    void chrome.action.setBadgeText({text: ""});
     if (opts.hideSticky) await toggleSticky(tabId, false);
     console.debug("runCapture finished");
 }
@@ -266,10 +278,10 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
     console.debug("onMessage", msg);
     if (msg?.type === "START_CAPTURE" && typeof msg.tabId === "number") {
         runCapture(msg.tabId, msg.opts as StartOpts)
-            .then(() => sendResponse({ ok: true }))
+            .then(() => sendResponse({ok: true}))
             .catch(e => {
                 console.error("runCapture error:", e);
-                sendResponse({ ok: false, error: String(e) });
+                sendResponse({ok: false, error: String(e)});
             });
         return true; // async
     }
