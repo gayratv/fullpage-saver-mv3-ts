@@ -5,14 +5,19 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "ncu": "npx npm-check-updates",
-    "ncu-u": "npx npm-check-updates -u"
-    "build-old": "esbuild src/background.ts --bundle --format=esm --outfile=dist/background.js && esbuild src/offscreen.ts --bundle --format=iife --outfile=dist/offscreen.js && esbuild src/popup.ts --bundle --format=iife --outfile=dist/popup.js",
+    "ncu-u": "npx npm-check-updates -u",
+    "build-old": "esbuild src/background.ts --bundle --format=esm --outfile=dist/background.js && esbuild src/offscreen.ts --bundle --format=iife --outfile=dist/offscreen.js && esbuild src/popup.ts --bundle --format=iife --outfile=dist/popup.js"
   },
   "devDependencies": {
+    "@eslint/js": "^9.33.0",
     "@types/chrome": "^0.1.4",
     "esbuild": "^0.25.9",
     "esbuild-plugin-copy": "^2.1.1",
-    "typescript": "^5.9.2"
+    "eslint": "^9.33.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.39.1"
   }
 }
