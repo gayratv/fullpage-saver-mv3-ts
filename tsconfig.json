@@ -12,11 +12,15 @@
     "sourceMap": true,
     "outDir": "dist",
     "types": [
-      "chrome"
+      "chrome",
+      "node"
     ],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowJs": true
   },
   "include": [
-    "src"
+    "src",
+    "./build.mjs",
+    "./eslint.config.js"
   ]
 }

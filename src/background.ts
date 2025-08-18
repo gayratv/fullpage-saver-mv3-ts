@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
-// Новая логика с использованием Debugger API
+// Финальная логика: прокрутка для загрузки + Debugger API
 
 import type { StartOpts } from "./types";
 
@@ -14,7 +14,6 @@ function ts(): string {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-// Вспомогательная функция для работы с Debugger API через Promise
 // Вспомогательная функция для работы с Debugger API через Promise
 function sendDebuggerCommand(target: chrome.debugger.Debuggee, method: string, params?: { [key: string]: any }): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -41,9 +40,25 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         await chrome.debugger.attach(debuggee, protocolVersion);
         console.debug("Debugger attached");
 
-        // 2. Получаем размеры всей страницы
+        // --- НОВАЯ ЛОГИКА: ПРОКРУТКА ДЛЯ ЗАГРУЗКИ КОНТЕНТА ---
+        setBadgeProgress(25);
+        console.debug("Scrolling to bottom to trigger lazy loading...");
+        await sendDebuggerCommand(debuggee, "Runtime.evaluate", {
+            expression: "window.scrollTo(0, document.body.scrollHeight)",
+            awaitPromise: true,
+        });
+        // Даем время на подгрузку
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.debug("Scrolling back to top...");
+        await sendDebuggerCommand(debuggee, "Runtime.evaluate", {
+            expression: "window.scrollTo(0, 0)",
+            awaitPromise: true,
+        });
+        // ----------------------------------------------------
+
+        // 2. Получаем размеры всей страницы (теперь уже с подгруженным контентом)
         const { contentSize } = await sendDebuggerCommand(debuggee, "Page.getLayoutMetrics") as { contentSize: { width: number, height: number }};
-        console.debug("Layout metrics", contentSize);
+        console.debug("Layout metrics after scroll", contentSize);
 
         if (contentSize.height === 0) {
             throw new Error("Не удалось определить высоту страницы. Возможно, страница еще загружается.");
@@ -87,12 +102,28 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
 
     } catch (e) {
         console.error("Capture failed:", e);
-        // Можно добавить уведомление для пользователя об ошибке
+        // Уведомление для пользователя об ошибке
         await chrome.scripting.executeScript({
             target: { tabId },
-            func: (message: string) => { alert(`Ошибка захвата страницы:\n${message}`); },
+            func: (message: string) => {
+                // Используем стилизованный блок вместо alert
+                const errorBox = document.createElement('div');
+                errorBox.style.position = 'fixed';
+                errorBox.style.top = '20px';
+                errorBox.style.right = '20px';
+                errorBox.style.padding = '20px';
+                errorBox.style.backgroundColor = '#ffdddd';
+                errorBox.style.border = '1px solid #ff0000';
+                errorBox.style.borderRadius = '8px';
+                errorBox.style.zIndex = '2147483647';
+                errorBox.style.fontFamily = 'sans-serif';
+                errorBox.style.fontSize = '16px';
+                errorBox.textContent = `Ошибка захвата страницы: ${message}`;
+                document.body.appendChild(errorBox);
+                setTimeout(() => errorBox.remove(), 5000);
+            },
             args: [String(e)]
-        });
+        }).catch(err => console.error("Failed to show error message:", err));
 
     } finally {
         // 5. Обязательно отключаем отладчик
