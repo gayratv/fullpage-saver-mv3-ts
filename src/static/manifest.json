@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Full Page Saver (TS, MV3)",
-  "version": "1.2.1",
+  "version": "1.2.0",
   "description": "Сохраняет всю страницу как JPEG/PNG с автопрокруткой и сшивкой (TypeScript + MV3).",
   "action": {
     "default_title": "Full Page Saver",
@@ -11,19 +11,12 @@
     "activeTab",
     "scripting",
     "downloads",
-    "offscreen",
-    "debugger"
+    "offscreen"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [ "content/findElement.js" ],
-      "matches": [ "<all_urls>" ]
-    }
-  ],
   "host_permissions": [
     "<all_urls>"
   ]

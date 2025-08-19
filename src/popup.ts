@@ -9,6 +9,7 @@ q.addEventListener("input", () => (qv.textContent = q.value));
     const opts = {
         format: (document.getElementById("format") as HTMLSelectElement).value as "jpeg" | "png",
         quality: parseInt(q.value, 10) / 100,
+        saveAs: (document.getElementById("saveAs") as HTMLInputElement).checked,
         hideSticky: (document.getElementById("hideSticky") as HTMLInputElement).checked,
     };
     (document.getElementById("start") as HTMLButtonElement).disabled = true;
