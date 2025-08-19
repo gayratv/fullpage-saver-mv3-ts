@@ -11,6 +11,7 @@ export interface Plan {
     overlap: number;
     step: number;
     stops: number[];
+    headerHeight: number;
 }
 
 export interface Tile {
