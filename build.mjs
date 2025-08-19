@@ -17,11 +17,10 @@ await build({
     sourcemap: true,
 });
 
-// 2) Бандлим скрипты для popup и offscreen (как IIFE)
+// 2) Бандлим скрипт для popup (как IIFE)
 await build({
     entryPoints: {
         popup: "src/popup.ts",
-        offscreen: "src/offscreen.ts",
     },
     bundle: true,
     format: "iife",
@@ -49,18 +48,7 @@ function fixHtmlScripts(html, map = {}) {
     await writeFile(path.join(outdir, "popup.html"), html, "utf8");
 }
 
-// 4) offscreen.html
-{
-    const offHtmlSrc = "src/static/offscreen.html";
-    let html = await readFile(offHtmlSrc, "utf8");
-    html = fixHtmlScripts(html, {
-        "offscreen.js": /\.\.\/.*?dist\/offscreen\.js|"dist\/offscreen\.js"|offscreen\.js/g,
-    });
-    await writeFile(path.join(outdir, "offscreen.html"), html, "utf8");
-}
-
-
-// 5) manifest.json → правим пути
+// 4) manifest.json → правим пути
 {
     const raw = await readFile("src/static/manifest.json", "utf8");
     const m = JSON.parse(raw);
@@ -83,7 +71,7 @@ function fixHtmlScripts(html, map = {}) {
     await writeFile(path.join(outdir, "manifest.json"), JSON.stringify(m, null, 2), "utf8");
 }
 
-// 6) (опционально) иконки/ассеты
+// 5) (опционально) иконки/ассеты
 try { await cp("src/static/icons", path.join(outdir, "icons"), { recursive: true }); } catch {}
 
 console.log("✅ Build complete → dist/");
