@@ -2,35 +2,40 @@
 <meta charset="utf-8">
 <title>Full Page Saver (TS)</title>
 <style>
-  body{font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:12px; width:280px;}
-  .row{display:flex; align-items:center; justify-content:space-between; margin:8px 0;}
-  input[type=range]{width:120px;}
-  button{padding:8px 10px; border:0; border-radius:8px; background:#0b57d0; color:#fff; cursor:pointer;}
-  button:disabled{opacity:.6; cursor:default;}
-  .muted{color:#666; font-size:12px;}
+    body{font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:12px; width:280px;}
+    .row{display:flex; align-items:center; justify-content:space-between; margin:8px 0;}
+    input[type=range]{width:120px;}
+    input[type=text]{width:120px; border: 1px solid #ccc; border-radius: 4px; padding: 4px 6px;}
+    button{padding:8px 10px; border:0; border-radius:8px; background:#0b57d0; color:#fff; cursor:pointer;}
+    button:disabled{opacity:.6; cursor:default;}
+    .muted{color:#666; font-size:12px;}
 </style>
 <div class="row">
-  <label for="format">Формат:</label>
-  <select id="format">
-    <option value="jpeg" selected>JPEG</option>
-    <option value="png">PNG</option>
-  </select>
+    <label for="format">Формат:</label>
+    <select id="format">
+        <option value="jpeg" selected>JPEG</option>
+        <option value="png">PNG</option>
+    </select>
 </div>
 <div class="row">
-  <label for="quality">Качество:</label>
-  <input id="quality" type="range" min="60" max="100" value="92">
-  <span id="qv">92</span>
+    <label for="quality">Качество:</label>
+    <input id="quality" type="range" min="60" max="100" value="92">
+    <span id="qv">92</span>
 </div>
 <div class="row">
-  <label for="saveAs">«Сохранить как…»</label>
-  <input id="saveAs" type="checkbox">
+    <label for="saveDir">Папка сохранения:</label>
+    <input id="saveDir" type="text" value="screenshots">
 </div>
 <div class="row">
-  <label for="hideSticky">Скрывать липкие элементы</label>
-  <input id="hideSticky" type="checkbox" checked>
+    <label for="saveAs">«Сохранить как…»</label>
+    <input id="saveAs" type="checkbox" title="Этот флажок будет проигнорирован при сохранении отдельных файлов">
 </div>
 <div class="row">
-  <button id="start">Сохранить всю страницу</button>
+    <label for="hideSticky">Скрывать липкие элементы</label>
+    <input id="hideSticky" type="checkbox" checked>
+</div>
+<div class="row">
+    <button id="start">Сохранить фрагменты</button>
 </div>
 <p class="muted">Прогресс виден на бейдже иконки.</p>
-<script src="../../dist/popup.js"></script>
+<script src="popup.js"></script>

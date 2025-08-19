@@ -13,6 +13,7 @@ export interface Plan {
     stops: number[];
 }
 
+// Этот интерфейс больше не используется, но оставим его на будущее
 export interface Tile {
     y: number;
     dataUrl: string;
@@ -23,4 +24,5 @@ export interface StartOpts {
     quality: number; // 0..1 (ignored for PNG)
     saveAs: boolean;
     hideSticky: boolean;
+    saveDir: string;
 }
