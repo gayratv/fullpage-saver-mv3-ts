@@ -132,8 +132,13 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         await new Promise(r => setTimeout(r, 550));
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
 
+        // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+        // Заменяем все обратные слэши на прямые для кросс-платформенной совместимости
+        const saveDir = opts.saveDir.replace(/\\/g, '/');
         const ext = opts.format === "png" ? "png" : "jpg";
-        const filename = `${opts.saveDir}/scr-${y}.${ext}`;
+        const filename = `${saveDir}/scr-${y}.${ext}`;
+        // -----------------------
+
         console.debug(`downloading tile ${i + 1}/${plan.stops.length} to ${filename}`);
 
         await chrome.downloads.download({
