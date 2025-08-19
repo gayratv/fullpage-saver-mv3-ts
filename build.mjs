@@ -17,10 +17,11 @@ await build({
     sourcemap: true,
 });
 
-// 2) Бандлим скрипт для popup (как IIFE)
+// 2) Бандлим скрипты для popup и offscreen (как IIFE)
 await build({
     entryPoints: {
         popup: "src/popup.ts",
+        offscreen: "src/offscreen.ts",
     },
     bundle: true,
     format: "iife",
@@ -28,25 +29,17 @@ await build({
     sourcemap: true,
 });
 
-// 3) Просто компилируем findElement.ts без бандлинга, чтобы избежать tree-shaking
-await build({
-    entryPoints: ["src/content/findElement.ts"],
-    outfile: "dist/content/findElement.js",
-    sourcemap: true,
-    // 'bundle: true' здесь отсутствует намеренно
-});
-
 
 // утилита: фиксим ссылки на скрипты в HTML
 function fixHtmlScripts(html, map = {}) {
     let s = html;
     for (const [finalName, rx] of Object.entries(map)) {
-        s = s.replace(rx, finalName); // ../../dist/popup.js → popup.js
+        s = s.replace(rx, finalName);
     }
     return s;
 }
 
-// 4) popup.html
+// 3) popup.html
 {
     const popupHtmlSrc = "src/static/popup.html";
     let html = await readFile(popupHtmlSrc, "utf8");
@@ -55,6 +48,17 @@ function fixHtmlScripts(html, map = {}) {
     });
     await writeFile(path.join(outdir, "popup.html"), html, "utf8");
 }
+
+// 4) offscreen.html
+{
+    const offHtmlSrc = "src/static/offscreen.html";
+    let html = await readFile(offHtmlSrc, "utf8");
+    html = fixHtmlScripts(html, {
+        "offscreen.js": /\.\.\/.*?dist\/offscreen\.js|"dist\/offscreen\.js"|offscreen\.js/g,
+    });
+    await writeFile(path.join(outdir, "offscreen.html"), html, "utf8");
+}
+
 
 // 5) manifest.json → правим пути
 {
@@ -74,13 +78,6 @@ function fixHtmlScripts(html, map = {}) {
         m.action.default_popup = stripToBasename(m.action.default_popup);
     } else {
         m.action = { ...(m.action || {}), default_popup: "popup.html" };
-    }
-
-    if (Array.isArray(m.content_scripts)) {
-        for (const cs of m.content_scripts) {
-            if (Array.isArray(cs.js))  cs.js  = cs.js.map(stripToBasename);
-            if (Array.isArray(cs.css)) cs.css = cs.css.map(stripToBasename);
-        }
     }
 
     await writeFile(path.join(outdir, "manifest.json"), JSON.stringify(m, null, 2), "utf8");
