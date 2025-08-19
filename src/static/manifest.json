@@ -10,8 +10,7 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "downloads",
-    "offscreen"
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js",

@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
 
-import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
+import type { CaptureFormat, Plan, StartOpts } from "./types";
 
 
 console.debug("service worker start", { version: chrome.runtime.getManifest().version });
@@ -11,29 +11,6 @@ function sanitize(name?: string): string {
 }
 function ts(): string {
     return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
-let creatingOffscreen: Promise<void> | null = null;
-async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
-    const url = chrome.runtime.getURL(path);
-    try {
-        const ctxs = await chrome.runtime.getContexts?.({
-            contextTypes: ["OFFSCREEN_DOCUMENT"],
-            documentUrls: [url],
-        });
-        if (ctxs && ctxs.length) return;
-    } catch {
-        // older Chrome — просто создаём offscreen
-    }
-    if (!creatingOffscreen) {
-        creatingOffscreen = chrome.offscreen.createDocument({
-            url: path,
-            reasons: ["BLOBS"],
-            justification: "Stitch captured frames via Canvas and export as image",
-        });
-    }
-    await creatingOffscreen;
-    creatingOffscreen = null;
 }
 
 async function toggleSticky(tabId: number, enable: boolean): Promise<void> {
@@ -148,9 +125,6 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     const tab = await chrome.tabs.get(tabId);
     console.debug("tab info", { url: tab.url, title: tab.title, windowId: tab.windowId });
 
-    await ensureOffscreen();
-    console.debug("offscreen ensured");
-
     const scrollSelector = await initAndGetScrollTarget(tabId);
     console.debug("scroll target initialized", { selector: scrollSelector });
 
@@ -160,51 +134,33 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     if (opts.hideSticky) await toggleSticky(tabId, true);
     console.debug("hideSticky", opts.hideSticky);
 
-    const tiles: Tile[] = [];
+    const u = new URL(tab.url || "https://example.com");
+    const nameBase = sanitize(`${u.hostname}_${tab.title || "page"}`);
+    const ext = opts.format === "png" ? "png" : "jpg";
+    const timestamp = ts();
+
     for (let i = 0; i < plan.stops.length; i++) {
         const y = plan.stops[i];
         await scrollToY(tabId, y, scrollSelector);
         await new Promise(r => setTimeout(r, 550));
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
-        tiles.push({ y, dataUrl });
+
+        const filename = `${nameBase}_${timestamp}_${String(i + 1).padStart(2, "0")}.${ext}`;
+        console.debug(`initiating download for tile ${i + 1}`, filename);
+        // Not awaiting is fine, let it run in the background.
+        chrome.downloads.download({
+            url: dataUrl,
+            filename,
+            conflictAction: "uniquify",
+            saveAs: false, // saveAs is not practical for multiple files
+        });
+
         console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
         const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
         setBadgeProgress(pct);
     }
 
-    console.debug("stitching tiles", tiles.length);
-    const stitched: string = await new Promise((resolve, reject) => {
-        const port = chrome.runtime.connect({ name: "stitch" });
-        const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
-        port.onMessage.addListener((msg: any) => {
-            if (msg?.type === "stitched" && msg.dataUrl) { clearTimeout(timeout); resolve(msg.dataUrl); }
-            else if (msg?.type === "error") { clearTimeout(timeout); reject(new Error(msg.message)); }
-        });
-        port.postMessage({
-            type: "stitch",
-            plan,
-            tiles,
-            fileType: opts.format === "png" ? "image/png" : "image/jpeg",
-            quality: opts.quality ?? 0.92,
-        });
-    });
-    console.debug("stitching done", { length: stitched.length });
-
-    const u = new URL(tab.url || "https://example.com");
-    const nameBase = sanitize(`${u.hostname}_${tab.title || "page"}`);
-    const ext = opts.format === "png" ? "png" : "jpg";
-    const filename = `${nameBase}_${ts()}.${ext}`;
-    console.debug("initiating download", filename);
-
-    await chrome.downloads.download({
-        url: stitched,
-        filename,
-        conflictAction: opts.saveAs ? "prompt" : "uniquify",
-        saveAs: opts.saveAs,
-    });
-    console.debug("download triggered", filename);
-
-    void  chrome.action.setBadgeText({ text: "" });
+    void chrome.action.setBadgeText({ text: "" });
     if (opts.hideSticky) await toggleSticky(tabId, false);
     console.debug("runCapture finished");
 }
