@@ -22,7 +22,5 @@ export interface Tile {
 export interface StartOpts {
     format: CaptureFormat;
     quality: number; // 0..1 (ignored for PNG)
-    saveAs: boolean;
     hideSticky: boolean;
-    saveDir: string;
 }

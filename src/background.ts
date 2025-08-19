@@ -112,43 +112,6 @@ function setBadgeProgress(percent: number): void {
     void chrome.action.setBadgeText({ text: String(percent) });
 }
 
-// --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТЛАДКИ ЗАГРУЗОК ---
-function downloadFileWithDebug(options: chrome.downloads.DownloadOptions): Promise<number> {
-    return new Promise((resolve, reject) => {
-        chrome.downloads.download(options, (downloadId) => {
-            if (chrome.runtime.lastError) {
-                console.error('ОШИБКА ИНИЦИАЦИИ ЗАГРУЗКИ:', chrome.runtime.lastError.message);
-                return reject(chrome.runtime.lastError);
-            }
-            if (typeof downloadId === 'undefined') {
-                console.error('ОШИБКА: ID загрузки не был получен.');
-                return reject(new Error('Download ID is undefined.'));
-            }
-
-            console.log(`Загрузка начата с ID: ${downloadId}`);
-
-            const listener = (delta: chrome.downloads.DownloadDelta) => {
-                if (delta.id === downloadId) {
-                    if (delta.state) {
-                        console.log(`Статус загрузки ${downloadId} изменен на: ${delta.state.current}`);
-                        if (delta.state.current === 'complete') {
-                            chrome.downloads.onChanged.removeListener(listener);
-                            resolve(downloadId);
-                        } else if (delta.state.current === 'interrupted') {
-                            chrome.downloads.onChanged.removeListener(listener);
-                            const reason = delta.error ? delta.error.current : 'UNKNOWN';
-                            console.error(`Загрузка ${downloadId} прервана. Причина: ${reason}`);
-                            reject(new Error(`Download interrupted: ${reason}`));
-                        }
-                    }
-                }
-            };
-            chrome.downloads.onChanged.addListener(listener);
-        });
-    });
-}
-
-
 async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     console.debug("runCapture start", { tabId, opts });
     const tab = await chrome.tabs.get(tabId);
@@ -169,24 +132,16 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         await new Promise(r => setTimeout(r, 550));
         const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
 
-        const saveDir = opts.saveDir.replace(/\\/g, '/');
         const ext = opts.format === "png" ? "png" : "jpg";
-        const filename = `${saveDir}/scr-${y}.${ext}`;
+        const filename = `screenshots/scr-${y}.${ext}`; // <-- ИЗМЕНЕНИЕ ЗДЕСЬ
         console.debug(`downloading tile ${i + 1}/${plan.stops.length} to ${filename}`);
 
-        try {
-            await downloadFileWithDebug({
-                url: dataUrl,
-                filename: filename,
-                conflictAction: "uniquify",
-                saveAs: false,
-            });
-            console.log(`Файл ${filename} успешно сохранен.`);
-        } catch (downloadError) {
-            console.error(`Не удалось сохранить файл ${filename}:`, downloadError);
-            // Останавливаем процесс, если одна из загрузок не удалась
-            throw new Error(`Download failed for ${filename}`);
-        }
+        await chrome.downloads.download({
+            url: dataUrl,
+            filename: filename,
+            conflictAction: "uniquify",
+            saveAs: false,
+        });
 
         const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
         setBadgeProgress(pct);
@@ -207,7 +162,10 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
     if (msg?.type === "START_CAPTURE" && typeof msg.tabId === "number") {
         runCapture(msg.tabId, msg.opts as StartOpts)
             .then(() => sendResponse({ ok: true }))
-            .catch(e => sendResponse({ ok: false, error: String(e) }));
+            .catch(e => {
+                console.error("runCapture failed:", e);
+                sendResponse({ ok: false, error: String(e) });
+            });
         return true;
     }
 });

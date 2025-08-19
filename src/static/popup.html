@@ -5,7 +5,6 @@
     body{font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:12px; width:280px;}
     .row{display:flex; align-items:center; justify-content:space-between; margin:8px 0;}
     input[type=range]{width:120px;}
-    input[type=text]{width:120px; border: 1px solid #ccc; border-radius: 4px; padding: 4px 6px;}
     button{padding:8px 10px; border:0; border-radius:8px; background:#0b57d0; color:#fff; cursor:pointer;}
     button:disabled{opacity:.6; cursor:default;}
     .muted{color:#666; font-size:12px;}
@@ -23,19 +22,11 @@
     <span id="qv">92</span>
 </div>
 <div class="row">
-    <label for="saveDir">Папка сохранения:</label>
-    <input id="saveDir" type="text" value="F:\tempg\5">
-</div>
-<div class="row">
-    <label for="saveAs">«Сохранить как…»</label>
-    <input id="saveAs" type="checkbox" title="Этот флажок будет проигнорирован при сохранении отдельных файлов">
-</div>
-<div class="row">
     <label for="hideSticky">Скрывать липкие элементы</label>
     <input id="hideSticky" type="checkbox" checked>
 </div>
 <div class="row">
     <button id="start">Сохранить фрагменты</button>
 </div>
-<p class="muted">Прогресс виден на бейдже иконки.</p>
+<p class="muted">Файлы будут сохранены в папку "screenshots" в ваших Загрузках.</p>
 <script src="popup.js"></script>
