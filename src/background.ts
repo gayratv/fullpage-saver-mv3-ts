@@ -3,6 +3,8 @@
 
 import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
 
+// const HEADER_VERTICAL_PADDING = 10; // box-shadow: 0 0 10px rgba(50,50,50,.75);
+const HEADER_VERTICAL_PADDING = 0;
 
 console.debug("service worker start", { version: chrome.runtime.getManifest().version });
 
@@ -14,8 +16,24 @@ function ts(): string {
 }
 
 let creatingOffscreen: Promise<void> | null = null;
+/**
+ * Гарантирует наличие и доступность offscreen-документа.
+ * В Manifest V3 service workers не имеют прямого доступа к DOM, который необходим
+ * для таких задач, как создание canvas и манипуляции с изображениями.
+ * Offscreen API предоставляет способ запустить документ в фоновом режиме с доступом к DOM.
+ *
+ * Эта функция сначала проверяет, существует ли уже offscreen-документ с указанным путем.
+ * Если он существует, функция ничего не делает.
+ * Если нет, она создает новый offscreen-документ.
+ * Мьютекс (`creatingOffscreen`) используется для предотвращения состояний гонки, когда несколько
+ * частей расширения могут одновременно пытаться создать offscreen-документ.
+ *
+ * @param path Путь к HTML-файлу для offscreen-документа.
+ */
 async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
     const url = chrome.runtime.getURL(path);
+    // Проверяем, открыт ли уже offscreen-документ
+    // Если нет, создаем его
     try {
         const ctxs = await chrome.runtime.getContexts?.({
             contextTypes: ["OFFSCREEN_DOCUMENT"],
@@ -34,6 +52,28 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
     }
     await creatingOffscreen;
     creatingOffscreen = null;
+}
+
+async function toggleHeaderShadow(tabId: number, enable: boolean): Promise<void> {
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (on: boolean) => {
+            const id = "__fps_hide_header_shadow_style__";
+            let el = document.getElementById(id) as HTMLStyleElement | null;
+            if (on) {
+                if (el) return;
+                el = document.createElement("style");
+                el.id = id;
+                el.textContent = `
+          body > header > nav { box-shadow: none !important; }
+        `;
+                document.documentElement.appendChild(el);
+            } else {
+                el?.remove();
+            }
+        },
+        args: [enable],
+    });
 }
 
 async function toggleSticky(tabId: number, enable: boolean): Promise<void> {
@@ -82,39 +122,66 @@ async function initAndGetScrollTarget(tabId: number): Promise<string> {
 }
 
 async function getPlan(tabId: number, selector: string): Promise<Plan> {
-    const [{ result }] = await chrome.scripting.executeScript<[string], Plan>({
+    const injectionResults = await chrome.scripting.executeScript<[string, number], { data?: Plan; error?: string }>({
         target: { tabId },
-        args: [selector],
-        func: (sel: string) => {
-            const el = document.querySelector(sel) as HTMLElement | null;
-            if (!el) throw new Error(`Scroll target not found: ${sel}`);
+        args: [selector, HEADER_VERTICAL_PADDING],
+        func: (sel, headerPadding) => {
+            try {
+                const el = document.querySelector(sel) as HTMLElement | null;
+                if (!el) {
+                    return { error: `Scroll target not found: ${sel}` };
+                }
 
-            const header = document.querySelector("body > header > nav") as HTMLElement | null;
+                const header = document.querySelector("body > header") as HTMLElement | null;
 
-            const dpr = self.devicePixelRatio || 1;
-            const vw = innerWidth;
-            const vh = el.clientHeight;
-            const sw = el.scrollWidth;
-            const sh = el.scrollHeight;
-            const headerHeight = header?.offsetHeight || 0;
+                const dpr = self.devicePixelRatio || 1;
+                const vw = innerWidth;
+                const vh = el.clientHeight;
+                const sw = el.scrollWidth;
+                const sh = el.scrollHeight;
+                const headerHeight = (header ? header.offsetHeight : 0) + headerPadding;
 
-            const overlap = Math.min(64, Math.floor(vh * 0.08));
-            const step = Math.max(1, vh - overlap);
+                if (vh === 0 || sh === 0) {
+                    return { error: `Invalid dimensions: vh=${vh}, sh=${sh}` };
+                }
 
-            const stops: number[] = [0];
-            let lastPos = 0;
-            while (lastPos < sh - vh) {
-                lastPos += step;
-                stops.push(Math.min(lastPos, sh - vh));
+                const overlap = Math.min(64, Math.floor(vh * 0.08));
+                const step = Math.max(1, vh - overlap);
+
+                const stops: number[] = [0];
+                let lastPos = 0;
+                while (lastPos < sh - vh) {
+                    lastPos += step;
+                    stops.push(Math.min(lastPos, sh - vh));
+                }
+
+                const plan = { dpr, vw, vh, sw, sh, overlap, step, stops, headerHeight };
+                return { data: plan };
+            } catch (e) {
+                return { error: e instanceof Error ? e.message : String(e) };
             }
-
-            return { dpr, vw, vh, sw, sh, overlap, step, stops, headerHeight };
         },
     });
-    if (!result) {
-        throw new Error("getPlan: script did not return a Plan");
+
+    if (!injectionResults || injectionResults.length === 0) {
+        throw new Error("getPlan: script injection failed unexpectedly.");
     }
-    return result;
+
+    const mainFrameResult = injectionResults[0].result;
+
+    if (!mainFrameResult) {
+        throw new Error("getPlan: script did not return any result object.");
+    }
+
+    if (mainFrameResult.error) {
+        throw new Error(`getPlan script failed: ${mainFrameResult.error}`);
+    }
+
+    if (!mainFrameResult.data) {
+        throw new Error("getPlan: script did not return a Plan (no data).");
+    }
+
+    return mainFrameResult.data;
 }
 
 async function scrollToY(tabId: number, y: number, selector: string): Promise<void> {
@@ -151,65 +218,82 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     const tab = await chrome.tabs.get(tabId);
     console.debug("tab info", { url: tab.url, title: tab.title, windowId: tab.windowId });
 
-    await ensureOffscreen();
-    console.debug("offscreen ensured");
-
-    const scrollSelector = await initAndGetScrollTarget(tabId);
-    console.debug("scroll target initialized", { selector: scrollSelector });
-
-    const plan = await getPlan(tabId, scrollSelector);
-    console.debug("capture plan", plan);
-
+    await toggleHeaderShadow(tabId, true);
     if (opts.hideSticky) await toggleSticky(tabId, true);
-    console.debug("hideSticky", opts.hideSticky);
 
-    const tiles: Tile[] = [];
-    for (let i = 0; i < plan.stops.length; i++) {
-        const y = plan.stops[i];
-        await scrollToY(tabId, y, scrollSelector);
-        await new Promise(r => setTimeout(r, 550));
-        const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
-        tiles.push({ y, dataUrl });
-        console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
-        const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
-        setBadgeProgress(pct);
+    try {
+        await ensureOffscreen();
+        console.debug("offscreen ensured");
+
+        const scrollSelector = await initAndGetScrollTarget(tabId);
+        console.debug("scroll target initialized", { selector: scrollSelector });
+
+        const plan = await getPlan(tabId, scrollSelector);
+        console.debug("capture plan", plan);
+
+        const u = new URL(tab.url || "https://example.com");
+        const nameBase = sanitize(`${u.hostname}_${tab.title || "page"}`);
+        const ext = opts.format === "png" ? "png" : "jpg";
+        const timestamp = ts(); // Единая временная метка для всей сессии захвата
+
+        const tiles: Tile[] = [];
+        for (let i = 0; i < plan.stops.length; i++) {
+            const y = plan.stops[i];
+            await scrollToY(tabId, y, scrollSelector);
+            await new Promise(r => setTimeout(r, 550));
+            const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
+            tiles.push({ y, dataUrl });
+
+            // Сохраняем каждый кадр отдельно для отладки или других целей.
+            // Мы не ждем (await) этот промис, чтобы не блокировать процесс захвата.
+            const frameFilename = `${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
+            chrome.downloads.download({
+                url: dataUrl,
+                filename: frameFilename,
+                conflictAction: "uniquify",
+                saveAs: false, // `saveAs` не может быть true для множественных загрузок.
+            });
+
+            console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
+            const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
+            setBadgeProgress(pct);
+        }
+
+        console.debug("stitching tiles", tiles.length);
+        const stitched: string = await new Promise((resolve, reject) => {
+            const port = chrome.runtime.connect({ name: "stitch" });
+            const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
+            port.onMessage.addListener((msg: any) => {
+                if (msg?.type === "stitched" && msg.dataUrl) { clearTimeout(timeout); resolve(msg.dataUrl); }
+                else if (msg?.type === "error") { clearTimeout(timeout); reject(new Error(msg.message)); }
+            });
+            port.postMessage({
+                type: "stitch",
+                plan,
+                tiles,
+                fileType: opts.format === "png" ? "image/png" : "image/jpeg",
+                quality: opts.quality ?? 0.92,
+            });
+        });
+        console.debug("stitching done", { length: stitched.length });
+
+        const finalFilename = `${nameBase}_${timestamp}_stitched.${ext}`;
+        console.debug("initiating download", finalFilename);
+
+        await chrome.downloads.download({
+            url: stitched,
+            filename: finalFilename,
+            conflictAction: opts.saveAs ? "prompt" : "uniquify",
+            saveAs: opts.saveAs,
+        });
+        console.debug("download triggered", finalFilename);
+
+    } finally {
+        void chrome.action.setBadgeText({ text: "" });
+        // await toggleHeaderShadow(tabId, false);
+        if (opts.hideSticky) await toggleSticky(tabId, false);
+        console.debug("runCapture finished, cleanup complete.");
     }
-
-    console.debug("stitching tiles", tiles.length);
-    const stitched: string = await new Promise((resolve, reject) => {
-        const port = chrome.runtime.connect({ name: "stitch" });
-        const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
-        port.onMessage.addListener((msg: any) => {
-            if (msg?.type === "stitched" && msg.dataUrl) { clearTimeout(timeout); resolve(msg.dataUrl); }
-            else if (msg?.type === "error") { clearTimeout(timeout); reject(new Error(msg.message)); }
-        });
-        port.postMessage({
-            type: "stitch",
-            plan,
-            tiles,
-            fileType: opts.format === "png" ? "image/png" : "image/jpeg",
-            quality: opts.quality ?? 0.92,
-        });
-    });
-    console.debug("stitching done", { length: stitched.length });
-
-    const u = new URL(tab.url || "https://example.com");
-    const nameBase = sanitize(`${u.hostname}_${tab.title || "page"}`);
-    const ext = opts.format === "png" ? "png" : "jpg";
-    const filename = `${nameBase}_${ts()}.${ext}`;
-    console.debug("initiating download", filename);
-
-    await chrome.downloads.download({
-        url: stitched,
-        filename,
-        conflictAction: opts.saveAs ? "prompt" : "uniquify",
-        saveAs: opts.saveAs,
-    });
-    console.debug("download triggered", filename);
-
-    void  chrome.action.setBadgeText({ text: "" });
-    if (opts.hideSticky) await toggleSticky(tabId, false);
-    console.debug("runCapture finished");
 }
 
 chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
