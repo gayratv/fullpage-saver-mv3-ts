@@ -11,7 +11,8 @@
     "activeTab",
     "scripting",
     "downloads",
-    "offscreen"
+    "offscreen",
+    "storage"
   ],
   "background": {
     "service_worker": "background.js",

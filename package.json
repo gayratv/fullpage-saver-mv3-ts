@@ -12,7 +12,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
-    "@types/chrome": "^0.1.4",
+    "@types/chrome": "^0.0.268",
     "@types/node": "^24.3.0",
     "esbuild": "^0.25.9",
     "esbuild-plugin-copy": "^2.1.1",

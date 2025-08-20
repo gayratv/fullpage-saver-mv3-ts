@@ -3,10 +3,24 @@
 
 import type { CaptureFormat, Plan, Tile, StartOpts } from "./types";
 
-// const HEADER_VERTICAL_PADDING = 10; // box-shadow: 0 0 10px rgba(50,50,50,.75);
-const HEADER_VERTICAL_PADDING = 0;
+const HEADER_VERTICAL_PADDING = 10; // box-shadow: 0 0 10px rgba(50,50,50,.75);
+// const SCROLL_TARGET_ATTR = "data-fps-scroll-target";
+// const SCROLLABLE_ELEMENT="#page-container"
 
 console.debug("service worker start", { version: chrome.runtime.getManifest().version });
+
+/**
+ * Получает имя следующей поддиректории для загрузки, увеличивая счетчик в chrome.storage.
+ * @returns {Promise<string>} Имя поддиректории, например "DL-001".
+ */
+async function getNextDownloadDirectory(): Promise<string> {
+    const key = 'lastDirIndex';
+    const result = await chrome.storage.local.get([key]);
+    const lastIndex = result[key] || 0;
+    const newIndex = lastIndex + 1;
+    await chrome.storage.local.set({ [key]: newIndex });
+    return `DL-${String(newIndex).padStart(3, '0')}`;
+}
 
 function sanitize(name?: string): string {
     return (name || "page").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "page";
@@ -36,7 +50,7 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
     // Если нет, создаем его
     try {
         const ctxs = await chrome.runtime.getContexts?.({
-            contextTypes: ["OFFSCREEN_DOCUMENT"],
+            contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
             documentUrls: [url],
         });
         if (ctxs && ctxs.length) return;
@@ -46,7 +60,7 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
     if (!creatingOffscreen) {
         creatingOffscreen = chrome.offscreen.createDocument({
             url: path,
-            reasons: ["BLOBS"],
+            reasons: [chrome.offscreen.Reason.DOM_PARSER],
             justification: "Stitch captured frames via Canvas and export as image",
         });
     }
@@ -103,10 +117,10 @@ async function initAndGetScrollTarget(tabId: number): Promise<string> {
     const injectionResults = await chrome.scripting.executeScript<[], string>({
         target: { tabId },
         func: () => {
-            const container = document.querySelector('#page-container');
+            const container = document.querySelector("#page-container");
             if (container) {
                 container.setAttribute("data-fps-scroll-target", "1");
-                return '#page-container';
+                return "#page-container";
             }
 
             // Fallback to documentElement if specific container not found
@@ -195,6 +209,7 @@ async function scrollToY(tabId: number, y: number, selector: string): Promise<vo
             } else {
                 window.scrollTo(0, top);
             }
+
             await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
             await new Promise(r => setTimeout(r, 150));
         },
@@ -217,6 +232,9 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     console.debug("runCapture start", { tabId, opts });
     const tab = await chrome.tabs.get(tabId);
     console.debug("tab info", { url: tab.url, title: tab.title, windowId: tab.windowId });
+
+    const downloadSubDir = await getNextDownloadDirectory();
+    console.debug(`Using download subdirectory: ${downloadSubDir}`);
 
     await toggleHeaderShadow(tabId, true);
     if (opts.hideSticky) await toggleSticky(tabId, true);
@@ -244,14 +262,12 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
             tiles.push({ y, dataUrl });
 
-            // Сохраняем каждый кадр отдельно для отладки или других целей.
-            // Мы не ждем (await) этот промис, чтобы не блокировать процесс захвата.
-            const frameFilename = `${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
+            const frameFilename = `${downloadSubDir}/${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
             chrome.downloads.download({
                 url: dataUrl,
                 filename: frameFilename,
                 conflictAction: "uniquify",
-                saveAs: false, // `saveAs` не может быть true для множественных загрузок.
+                saveAs: false,
             });
 
             console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
@@ -263,10 +279,33 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         const stitched: string = await new Promise((resolve, reject) => {
             const port = chrome.runtime.connect({ name: "stitch" });
             const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
-            port.onMessage.addListener((msg: any) => {
-                if (msg?.type === "stitched" && msg.dataUrl) { clearTimeout(timeout); resolve(msg.dataUrl); }
-                else if (msg?.type === "error") { clearTimeout(timeout); reject(new Error(msg.message)); }
+
+            port.onMessage.addListener((msg: { type: string; dataUrl?: string; message?: string; frameIndex?: number }) => {
+                switch (msg.type) {
+                    case "stitched":
+                        if (msg.dataUrl) {
+                            clearTimeout(timeout);
+                            resolve(msg.dataUrl);
+                        }
+                        break;
+                    case "error":
+                        clearTimeout(timeout);
+                        reject(new Error(msg.message));
+                        break;
+                    case "debug_log":
+                        console.log("Offscreen debug log:", msg.message);
+                        break;
+                    case "debug_frame":
+                        {
+                            const debugFilename = `${downloadSubDir}/${nameBase}_${timestamp}_debug_frame_cropped_${String(msg.frameIndex).padStart(3, "0")}.${ext}`;
+                            chrome.downloads.download({
+                                url: msg.dataUrl!, filename: debugFilename, conflictAction: "uniquify", saveAs: false,
+                            });
+                        }
+                        break;
+                }
             });
+
             port.postMessage({
                 type: "stitch",
                 plan,
@@ -277,7 +316,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         });
         console.debug("stitching done", { length: stitched.length });
 
-        const finalFilename = `${nameBase}_${timestamp}_stitched.${ext}`;
+        const finalFilename = `${downloadSubDir}/${nameBase}_${timestamp}_stitched.${ext}`;
         console.debug("initiating download", finalFilename);
 
         await chrome.downloads.download({
@@ -290,7 +329,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
 
     } finally {
         void chrome.action.setBadgeText({ text: "" });
-        // await toggleHeaderShadow(tabId, false);
+        await toggleHeaderShadow(tabId, false);
         if (opts.hideSticky) await toggleSticky(tabId, false);
         console.debug("runCapture finished, cleanup complete.");
     }
