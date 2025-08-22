@@ -4,7 +4,9 @@ export type CaptureFormat = "jpeg" | "png";
 
 export interface Plan {
     dpr: number;
-    vw: number;
+    vw: number; // innerWidth
+    innerWidth: number;
+    innerHeight: number;
     vh: number;
     sw: number;
     sh: number;
