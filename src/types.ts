@@ -50,10 +50,23 @@ export type ErrorResponse = {
     message: string;
 };
 
-// Сообщение, которое ПРИХОДИТ снаружи в offscreen.ts
+export type DebugLogResponse = {
+    type: "debug_log";
+    message?: string;
+};
+
+export type DebugFrameResponse = {
+    type: "debug_frame";
+    dataUrl?: string;
+    frameIndex?: number;
+};
+
+// В сообщения, приходящие В background.ts из offscreen.ts (incoming):
+export type OffscreenIncoming =
+    | StitchedResponse
+    | ErrorResponse
+    | DebugLogResponse
+    | DebugFrameResponse;
+
+// Сообщение, которое background.ts отправляет В offscreen.ts (outgoing):
 export type OffscreenRequest = StitchRequest;
-
-// Сообщение, которое МЫ отправляем наружу из offscreen.ts
-export type OffscreenResponse = StitchedResponse | ErrorResponse;
-
-
