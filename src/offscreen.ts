@@ -1,12 +1,12 @@
 /* eslint-disable no-console */
-import type {Plan, Tile} from "./types";
+import type { Plan, Tile, OffscreenRequest, OffscreenResponse } from "./types";
 
 // Offscreen document to stitch tiles together
 
-async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: number, port: chrome.runtime.Port): Promise<string> {
+async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: number,  drawCroppedImage: boolean , port: chrome.runtime.Port): Promise<string> {
     port.postMessage({type: "debug_log", message: `offscreen stitch start, { plan:${plan}`});
 
-    const {dpr, sw, sh, overlap, headerHeight, stops, innerHeight} = plan;
+    const {dpr, sw, sh, overlap, headerHeight, stops, innerHeight, lastPosCorrection} = plan;
 
     const canvas = new OffscreenCanvas(sw * dpr, sh * dpr);
     const ctx = canvas.getContext("2d");
@@ -24,13 +24,14 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
 
 
         const isFirst = i === 0;
+        const isLast = i === tiles.length - 1;
         if (isFirst) {
             scaleY = img.height / innerHeight;
             scaleX = img.width / window.innerWidth;
         }
         const sY = isFirst ? 0 : headerHeight * scaleY;
         const sHeight = img.height - sY;
-        const dY = currentY;
+        const dY = isLast ? currentY - lastPosCorrection * scaleY : currentY;
 
         // Выводим отладочную информацию и отправляем ее в background.ts
         port.postMessage({
@@ -51,14 +52,16 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
          */
         ctx.drawImage(img, 0, sY, img.width, sHeight, 0, dY, img.width, sHeight);
 
-        // Создаем временный canvas для сохранения обрезанного кадра
-        const tempCanvas = new OffscreenCanvas(img.width, sHeight);
-        const tempCtx = tempCanvas.getContext("2d");
-        if (tempCtx) {
-            tempCtx.drawImage(img, 0, sY, img.width, sHeight, 0, 0, img.width, sHeight);
-            const blob = await tempCanvas.convertToBlob({type: fileType, quality});
-            const dataUrl = URL.createObjectURL(blob);
-            port.postMessage({type: "debug_frame", dataUrl, frameIndex: i + 1});
+        if (drawCroppedImage) {
+            // Создаем временный canvas для сохранения обрезанного кадра
+            const tempCanvas = new OffscreenCanvas(img.width, sHeight);
+            const tempCtx = tempCanvas.getContext("2d");
+            if (tempCtx) {
+                tempCtx.drawImage(img, 0, sY, img.width, sHeight, 0, 0, img.width, sHeight);
+                const blob = await tempCanvas.convertToBlob({type: fileType, quality});
+                const dataUrl = URL.createObjectURL(blob);
+                port.postMessage({type: "debug_frame", dataUrl, frameIndex: i + 1});
+            }
         }
 
         currentY += sHeight - overlap * scaleY + sY;
@@ -68,18 +71,29 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
     return URL.createObjectURL(blob);
 }
 
-chrome.runtime.onConnect.addListener(port => {
+
+chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== "stitch") return;
 
-    port.onMessage.addListener(async (msg: any) => {
-        if (msg.type === "stitch") {
-            try {
-                const dataUrl = await stitch(msg.plan, msg.tiles, msg.fileType, msg.quality, port);
-                port.postMessage({type: "stitched", dataUrl});
-            } catch (e) {
-                console.error("offscreen stitch failed:", e);
-                port.postMessage({type: "error", message: String(e)});
-            }
+    port.onMessage.addListener(async (msg: OffscreenRequest) => {
+        if (msg.type !== "stitch") return;
+
+        try {
+            const dataUrl = await stitch(
+                msg.plan,
+                msg.tiles,
+                msg.fileType,
+                msg.quality,
+                msg.drawCroppedImage,
+                port
+            );
+
+            const ok: OffscreenResponse = { type: "stitched", dataUrl };
+            port.postMessage(ok);
+        } catch (e) {
+            console.error("offscreen stitch failed:", e);
+            const err: OffscreenResponse = { type: "error", message: String(e) };
+            port.postMessage(err);
         }
     });
 });

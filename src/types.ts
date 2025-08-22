@@ -14,6 +14,7 @@ export interface Plan {
     step: number;
     stops: number[];
     headerHeight: number;
+    lastPosCorrection: number;
 }
 
 export interface Tile {
@@ -27,3 +28,32 @@ export interface StartOpts {
     saveAs: boolean;
     hideSticky: boolean;
 }
+
+// === Offscreen messaging (stitch) ===
+
+export type StitchRequest = {
+    type: "stitch";
+    plan: Plan;
+    tiles: Tile[];
+    fileType: string;   // e.g. "image/png" | "image/jpeg" | "image/webp"
+    quality: number;    // 0..1 для JPEG/WEBP; для PNG игнорируется
+    drawCroppedImage: boolean; // отрисовывать и выводить CroppedImage
+};
+
+export type StitchedResponse = {
+    type: "stitched";
+    dataUrl: string;
+};
+
+export type ErrorResponse = {
+    type: "error";
+    message: string;
+};
+
+// Сообщение, которое ПРИХОДИТ снаружи в offscreen.ts
+export type OffscreenRequest = StitchRequest;
+
+// Сообщение, которое МЫ отправляем наружу из offscreen.ts
+export type OffscreenResponse = StitchedResponse | ErrorResponse;
+
+

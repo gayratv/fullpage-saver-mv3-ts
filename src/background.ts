@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
 
-import type {CaptureFormat, Plan, Tile, StartOpts} from "./types";
+import {CaptureFormat, Plan, Tile, StartOpts, OffscreenRequest} from "./types";
 
 const HEADER_VERTICAL_PADDING = 0; // box-shadow: 0 0 10px rgba(50,50,50,.75);
 // const SCROLL_TARGET_ATTR = "data-fps-scroll-target";
@@ -171,8 +171,23 @@ async function getPlan(tabId: number, selector: string): Promise<Plan> {
                     lastPos += step;
                     stops.push(Math.min(lastPos, sh - vh));
                 }
+                // в конце lastPos==3816  stops.at(-1)==3586
 
-                const plan = {dpr, vw,innerWidth, innerHeight, vh, sw, sh, overlap, step, stops, headerHeight};
+                const lastPosCorrection = lastPos - stops.at(-1)!;
+                const plan = {
+                    dpr,
+                    vw,
+                    innerWidth,
+                    innerHeight,
+                    vh,
+                    sw,
+                    sh,
+                    overlap,
+                    step,
+                    stops,
+                    headerHeight,
+                    lastPosCorrection
+                };
                 return {data: plan};
             } catch (e) {
                 return {error: e instanceof Error ? e.message : String(e)};
@@ -313,13 +328,15 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
                 }
             });
 
-            port.postMessage({
+            const stitch_msg: OffscreenRequest = {
                 type: "stitch",
                 plan,
                 tiles,
                 fileType: opts.format === "png" ? "image/png" : "image/jpeg",
                 quality: opts.quality ?? 0.92,
-            });
+                drawCroppedImage: false
+            };
+            port.postMessage(stitch_msg);
         });
         console.debug("stitching done", {length: stitched.length});
 
