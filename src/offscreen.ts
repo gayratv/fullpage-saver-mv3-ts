@@ -1,9 +1,9 @@
 /* eslint-disable no-console */
-import type { Plan, Tile, OffscreenRequest, OffscreenResponse } from "./types";
+import {Plan, Tile, OffscreenRequest, OffscreenResponse, SaveCroppedImage} from "./types";
 
 // Offscreen document to stitch tiles together
 
-async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: number,  drawCroppedImage: boolean , port: chrome.runtime.Port): Promise<string> {
+async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: number, drawCroppedImage: boolean, port: chrome.runtime.Port): Promise<string> {
     port.postMessage({type: "debug_log", message: `offscreen stitch start, { plan:${plan}`});
 
     const {dpr, sw, sh, overlap, headerHeight, stops, innerHeight, lastPosCorrection} = plan;
@@ -36,7 +36,7 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
         // Выводим отладочную информацию и отправляем ее в background.ts
         port.postMessage({
             type: "debug_log",
-            message: `Frame ${i + 1}: sY=${sY}, dY=${dY}, sHeight=${sHeight}, stops[i]=${stops[i]}, scaleY=${scaleY}, dpr=${dpr}`
+            message: `Frame ${i + 1}: sY=${sY}, dY=${dY}, sHeight=${sHeight}, stops[i]=${stops[i]}, scaleY=${scaleY}, dpr=${dpr}`,
         });
 
         /*
@@ -52,6 +52,16 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
          */
         ctx.drawImage(img, 0, sY, img.width, sHeight, 0, dY, img.width, sHeight);
 
+        // Устанавливаем цвет заливки
+        ctx.fillStyle = "red";
+
+        const lineY = dY + sHeight;
+        // Прямоугольник (x, y, width, height)
+        ctx.fillRect(0, lineY, img.width, 5);
+        ctx.fillRect(0, lineY+10, img.width, 5);
+        ctx.fillRect(0, lineY+20, img.width, 5);
+        ctx.fillRect(0, lineY+30, img.width, 5);
+
         if (drawCroppedImage) {
             // Создаем временный canvas для сохранения обрезанного кадра
             const tempCanvas = new OffscreenCanvas(img.width, sHeight);
@@ -60,11 +70,12 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
                 tempCtx.drawImage(img, 0, sY, img.width, sHeight, 0, 0, img.width, sHeight);
                 const blob = await tempCanvas.convertToBlob({type: fileType, quality});
                 const dataUrl = URL.createObjectURL(blob);
-                port.postMessage({type: "debug_frame", dataUrl, frameIndex: i + 1});
+                const msg_save: SaveCroppedImage = {type: "debug_frame", dataUrl, frameIndex: i + 1};
+                port.postMessage(msg_save);
             }
         }
 
-        currentY += sHeight - overlap * scaleY + sY;
+        currentY += sHeight - overlap * scaleY + sY + 200;
     }
 
     const blob = await canvas.convertToBlob({type: fileType, quality});
@@ -85,14 +96,14 @@ chrome.runtime.onConnect.addListener((port) => {
                 msg.fileType,
                 msg.quality,
                 msg.drawCroppedImage,
-                port
+                port,
             );
 
-            const ok: OffscreenResponse = { type: "stitched", dataUrl };
+            const ok: OffscreenResponse = {type: "stitched", dataUrl};
             port.postMessage(ok);
         } catch (e) {
             console.error("offscreen stitch failed:", e);
-            const err: OffscreenResponse = { type: "error", message: String(e) };
+            const err: OffscreenResponse = {type: "error", message: String(e)};
             port.postMessage(err);
         }
     });

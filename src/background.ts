@@ -1,8 +1,10 @@
 /* eslint-disable no-console */
 // src/background.ts — MV3 Service Worker (ES module)
 
-import {CaptureFormat, Plan, Tile, StartOpts, OffscreenRequest} from "./types";
+import {CaptureFormat, Plan, Tile, StartOpts, OffscreenRequest, BackgroundListenersMSG} from "./types";
 
+const SAVE_CAPTURED_FRAMES = true;
+const DRAW_CROPPED_IMAGE = true;
 const HEADER_VERTICAL_PADDING = 0; // box-shadow: 0 0 10px rgba(50,50,50,.75);
 // const SCROLL_TARGET_ATTR = "data-fps-scroll-target";
 // const SCROLLABLE_ELEMENT="#page-container"
@@ -186,7 +188,7 @@ async function getPlan(tabId: number, selector: string): Promise<Plan> {
                     step,
                     stops,
                     headerHeight,
-                    lastPosCorrection
+                    lastPosCorrection,
                 };
                 return {data: plan};
             } catch (e) {
@@ -281,12 +283,15 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             tiles.push({y, dataUrl});
 
             const frameFilename = `${downloadSubDir}/${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
-            chrome.downloads.download({
-                url: dataUrl,
-                filename: frameFilename,
-                conflictAction: "uniquify",
-                saveAs: false,
-            });
+
+            if (SAVE_CAPTURED_FRAMES) {
+                chrome.downloads.download({
+                    url: dataUrl,
+                    filename: frameFilename,
+                    conflictAction: "uniquify",
+                    saveAs: false,
+                });
+            }
 
             console.debug(`captured tile ${i + 1}/${plan.stops.length} at y=${y}`);
             const pct = Math.min(99, Math.floor(((i + 1) / plan.stops.length) * 100));
@@ -298,12 +303,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             const port = chrome.runtime.connect({name: "stitch"});
             const timeout = setTimeout(() => reject(new Error("Offscreen stitch timeout")), 45000);
 
-            port.onMessage.addListener((msg: {
-                type: string;
-                dataUrl?: string;
-                message?: string;
-                frameIndex?: number
-            }) => {
+            port.onMessage.addListener((msg: BackgroundListenersMSG) => {
                 switch (msg.type) {
                     case "stitched":
                         if (msg.dataUrl) {
@@ -334,7 +334,7 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
                 tiles,
                 fileType: opts.format === "png" ? "image/png" : "image/jpeg",
                 quality: opts.quality ?? 0.92,
-                drawCroppedImage: false
+                drawCroppedImage: DRAW_CROPPED_IMAGE,
             };
             port.postMessage(stitch_msg);
         });

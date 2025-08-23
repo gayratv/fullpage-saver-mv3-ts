@@ -53,7 +53,23 @@ export type ErrorResponse = {
 // Сообщение, которое ПРИХОДИТ снаружи в offscreen.ts
 export type OffscreenRequest = StitchRequest;
 
+
+// Сообщение, которое МЫ отправляем наружу из offscreen.ts
+export type SaveCroppedImage = {
+    type: "debug_frame";
+    dataUrl: string;
+    frameIndex: number
+};
+
+export type DebugLog = {
+    type: "debug_log";
+    message: string;
+};
+
+
 // Сообщение, которое МЫ отправляем наружу из offscreen.ts
 export type OffscreenResponse = StitchedResponse | ErrorResponse;
 
-
+// background.ts
+// port.onMessage.addListener((msg: BackgroundListenersMSG) => {
+export type BackgroundListenersMSG = SaveCroppedImage | StitchedResponse | ErrorResponse | DebugLog;
