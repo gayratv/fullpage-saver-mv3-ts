@@ -282,7 +282,8 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
             const dataUrl = await captureVisible(tab.windowId!, opts.format, opts.quality);
             tiles.push({y, dataUrl});
 
-            const frameFilename = `${downloadSubDir}/${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
+            // const frameFilename = `${downloadSubDir}/${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
+            const frameFilename = `${nameBase}_${timestamp}_frame_${String(i + 1).padStart(3, "0")}.${ext}`;
 
             if (SAVE_CAPTURED_FRAMES) {
                 chrome.downloads.download({
@@ -340,7 +341,8 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         });
         console.debug("stitching done", {length: stitched.length});
 
-        const finalFilename = `${downloadSubDir}/${nameBase}_${timestamp}_stitched.${ext}`;
+        // const finalFilename = `${downloadSubDir}/${nameBase}_${timestamp}_stitched.${ext}`;
+        const finalFilename = `${nameBase}_${timestamp}_stitched.${ext}`;
         console.debug("initiating download", finalFilename);
 
         await chrome.downloads.download({
@@ -354,8 +356,16 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
     } finally {
         void chrome.action.setBadgeText({text: ""});
         // await toggleHeaderShadow(tabId, false);
-        if (opts.hideSticky) await toggleSticky(tabId, false);
+        // if (opts.hideSticky) await toggleSticky(tabId, false);
         console.debug("runCapture finished, cleanup complete.");
+
+        // переход на следующую страницу
+        await clickToolbarNextAndWaitSameTab(tabId, {
+            timeoutMs: 180_000,                 // если загрузка очень долгая
+            waitForSelector: "#page-container",    // что-то, что точно появляется только после полной инициализации
+            selectorTimeoutMs: 90_000,
+        });
+        console.debug("========= NEXT PAGE Loaded");
     }
 }
 
@@ -371,3 +381,120 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         return true;
     }
 });
+
+
+
+// =========================================
+// =========================================
+
+/** Ждёт, пока вкладка достигнет status === 'complete' (та же вкладка). */
+function waitForSameTabComplete(tabId: number, timeoutMs = 120_000): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let done = false;
+        const cleanup = () => {
+            if (done) return;
+            done = true;
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+            clearTimeout(timer);
+        };
+
+        const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+            if (updatedTabId !== tabId) return;
+            if (changeInfo.status === "complete") {
+                cleanup();
+                resolve();
+            }
+        };
+
+        chrome.tabs.onUpdated.addListener(onUpdated);
+
+        // Страховка: если уже complete
+        chrome.tabs.get(tabId, (t) => {
+            if (!chrome.runtime.lastError && t?.status === "complete") {
+                cleanup();
+                resolve();
+            }
+        });
+
+        const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error(`Timeout waiting for tab ${tabId} to complete`));
+        }, timeoutMs);
+    });
+}
+
+/** Внутри страницы: дождаться readyState === 'complete' и/или появления селектора. */
+function waitInPage(targetTabId: number, selector?: string, selectorTimeoutMs = 60_000): Promise<void> {
+    return chrome.scripting.executeScript({
+        target: { tabId: targetTabId },
+        func: (sel: string | undefined, selTimeout: number) => new Promise<void>((res) => {
+            const ready = () => {
+                if (!sel) return res();
+                const found = document.querySelector(sel);
+                if (found) return res();
+
+                // Ждём появления узла, если его ещё нет
+                const obs = new MutationObserver(() => {
+                    if (document.querySelector(sel)) {
+                        obs.disconnect();
+                        res();
+                    }
+                });
+                obs.observe(document.documentElement, { childList: true, subtree: true });
+                setTimeout(() => { obs.disconnect(); res(); }, selTimeout); // мягкий таймаут
+            };
+
+            if (document.readyState === "complete") ready();
+            else addEventListener("load", () => ready(), { once: true });
+        }),
+        args: [selector, selectorTimeoutMs],
+    }).then(() => undefined);
+}
+
+/**
+ * Кликает по #ToolbarNext в ЭТОЙ ЖЕ вкладке и ждёт полной загрузки.
+ * Опционально ждёт появления элемента `waitForSelector` после загрузки.
+ */
+export async function clickToolbarNextAndWaitSameTab(
+    tabId: number,
+    opts?: { timeoutMs?: number; waitForSelector?: string; selectorTimeoutMs?: number }
+): Promise<void> {
+    const { timeoutMs = 120_000, waitForSelector, selectorTimeoutMs = 60_000 } = opts ?? {};
+
+    // Запоминаем текущий URL — иногда полезно убеждаться, что он сменился.
+    const before = await chrome.tabs.get(tabId).then(t => t.url).catch(() => undefined);
+
+    // Делаем клик (с проверкой существования).
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+            const btn = document.querySelector<HTMLAnchorElement>("#ToolbarNext");
+            if (!btn) throw new Error("#ToolbarNext not found");
+            btn.click();
+        },
+    });
+
+    // Ждём status === 'complete' этой же вкладки (крутилка на табе должна остановиться).
+    await waitForSameTabComplete(tabId, timeoutMs);
+
+    // Дополнительно: ждём реальную готовность документа + (опц.) появления нужного селектора.
+    await waitInPage(tabId, waitForSelector, selectorTimeoutMs);
+
+    // (опц.) Если важно, что URL сменился, раскомментируйте:
+    const after = (await chrome.tabs.get(tabId)).url;
+    if (before && after === before) console.warn("URL did not change (possibly same-document navigation).");
+}
+
+
+// =========================================
+// =========================================
+/*
+await clickToolbarNextAndWaitSameTab(activeTabId, {
+    timeoutMs: 180_000,                 // если загрузка очень долгая
+    waitForSelector: "#page-container",    // что-то, что точно появляется только после полной инициализации
+    selectorTimeoutMs: 90_000,
+});
+
+document.getElementById("pagesnav").value если равно 0 - то вернулись к началу
+
+ */
