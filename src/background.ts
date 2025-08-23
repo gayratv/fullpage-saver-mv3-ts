@@ -3,8 +3,8 @@
 
 import {CaptureFormat, Plan, Tile, StartOpts, OffscreenRequest, BackgroundListenersMSG} from "./types";
 
-const SAVE_CAPTURED_FRAMES = true;
-const DRAW_CROPPED_IMAGE = true;
+const SAVE_CAPTURED_FRAMES = false;
+const DRAW_CROPPED_IMAGE = false;
 const HEADER_VERTICAL_PADDING = 0; // box-shadow: 0 0 10px rgba(50,50,50,.75);
 // const SCROLL_TARGET_ATTR = "data-fps-scroll-target";
 // const SCROLLABLE_ELEMENT="#page-container"
