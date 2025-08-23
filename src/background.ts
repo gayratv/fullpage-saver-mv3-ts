@@ -342,7 +342,12 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         console.debug("stitching done", {length: stitched.length});
 
         // const finalFilename = `${downloadSubDir}/${nameBase}_${timestamp}_stitched.${ext}`;
-        const finalFilename = `${nameBase}_${timestamp}_stitched.${ext}`;
+        const pageNum = await getPageNum(tabId);
+        const pageNumStr = pageNum.toString().padStart(4, "0"); // "0001"
+        // const finalFilename = `${nameBase}_${timestamp}_stitched.${ext}`;
+        const finalFilename = `просвещение ${pageNumStr}.${ext}`;
+
+
         console.debug("initiating download", finalFilename);
 
         await chrome.downloads.download({
@@ -360,12 +365,12 @@ async function runCapture(tabId: number, opts: StartOpts): Promise<void> {
         console.debug("runCapture finished, cleanup complete.");
 
         // переход на следующую страницу
-        await clickToolbarNextAndWaitSameTab(tabId, {
+        const pageNum = await clickToolbarNextAndWaitSameTab(tabId, {
             timeoutMs: 180_000,                 // если загрузка очень долгая
             waitForSelector: "#page-container",    // что-то, что точно появляется только после полной инициализации
             selectorTimeoutMs: 90_000,
         });
-        console.debug("========= NEXT PAGE Loaded");
+        console.debug("========= NEXT PAGE Loaded ", pageNum);
     }
 }
 
@@ -381,7 +386,6 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         return true;
     }
 });
-
 
 
 // =========================================
@@ -426,7 +430,7 @@ function waitForSameTabComplete(tabId: number, timeoutMs = 120_000): Promise<voi
 /** Внутри страницы: дождаться readyState === 'complete' и/или появления селектора. */
 function waitInPage(targetTabId: number, selector?: string, selectorTimeoutMs = 60_000): Promise<void> {
     return chrome.scripting.executeScript({
-        target: { tabId: targetTabId },
+        target: {tabId: targetTabId},
         func: (sel: string | undefined, selTimeout: number) => new Promise<void>((res) => {
             const ready = () => {
                 if (!sel) return res();
@@ -440,16 +444,41 @@ function waitInPage(targetTabId: number, selector?: string, selectorTimeoutMs = 
                         res();
                     }
                 });
-                obs.observe(document.documentElement, { childList: true, subtree: true });
-                setTimeout(() => { obs.disconnect(); res(); }, selTimeout); // мягкий таймаут
+                obs.observe(document.documentElement, {childList: true, subtree: true});
+                setTimeout(() => {
+                    obs.disconnect();
+                    res();
+                }, selTimeout); // мягкий таймаут
             };
 
             if (document.readyState === "complete") ready();
-            else addEventListener("load", () => ready(), { once: true });
+            else addEventListener("load", () => ready(), {once: true});
         }),
         args: [selector, selectorTimeoutMs],
     }).then(() => undefined);
 }
+
+// Универсальная функция получения pageNum из input#pagesnav
+export async function getPageNum(tabId: number): Promise<number> {
+    const [{result: pageStr}] = await chrome.scripting.executeScript({
+        target: {tabId},
+        func: () => {
+            const input = document.getElementById("pagesnav");
+            if (!(input instanceof HTMLInputElement)) return null;
+            return input.value ?? null;
+        },
+    });
+    if (pageStr == null) {
+        throw new Error("pagesnav not found or has no value");
+    }
+    const pageNum = Number.parseInt(pageStr, 10);
+    if (Number.isNaN(pageNum)) {
+        throw new Error(`pagesnav value is not a number: "${pageStr}"`);
+    }
+    console.log("Page number:", pageNum);
+    return pageNum;
+}
+
 
 /**
  * Кликает по #ToolbarNext в ЭТОЙ ЖЕ вкладке и ждёт полной загрузки.
@@ -457,16 +486,16 @@ function waitInPage(targetTabId: number, selector?: string, selectorTimeoutMs = 
  */
 export async function clickToolbarNextAndWaitSameTab(
     tabId: number,
-    opts?: { timeoutMs?: number; waitForSelector?: string; selectorTimeoutMs?: number }
-): Promise<void> {
-    const { timeoutMs = 120_000, waitForSelector, selectorTimeoutMs = 60_000 } = opts ?? {};
+    opts?: { timeoutMs?: number; waitForSelector?: string; selectorTimeoutMs?: number },
+): Promise<number> {
+    const {timeoutMs = 120_000, waitForSelector, selectorTimeoutMs = 60_000} = opts ?? {};
 
     // Запоминаем текущий URL — иногда полезно убеждаться, что он сменился.
     const before = await chrome.tabs.get(tabId).then(t => t.url).catch(() => undefined);
 
     // Делаем клик (с проверкой существования).
     await chrome.scripting.executeScript({
-        target: { tabId },
+        target: {tabId},
         func: () => {
             const btn = document.querySelector<HTMLAnchorElement>("#ToolbarNext");
             if (!btn) throw new Error("#ToolbarNext not found");
@@ -483,18 +512,7 @@ export async function clickToolbarNextAndWaitSameTab(
     // (опц.) Если важно, что URL сменился, раскомментируйте:
     const after = (await chrome.tabs.get(tabId)).url;
     if (before && after === before) console.warn("URL did not change (possibly same-document navigation).");
+
+    return getPageNum(tabId);
 }
 
-
-// =========================================
-// =========================================
-/*
-await clickToolbarNextAndWaitSameTab(activeTabId, {
-    timeoutMs: 180_000,                 // если загрузка очень долгая
-    waitForSelector: "#page-container",    // что-то, что точно появляется только после полной инициализации
-    selectorTimeoutMs: 90_000,
-});
-
-document.getElementById("pagesnav").value если равно 0 - то вернулись к началу
-
- */
