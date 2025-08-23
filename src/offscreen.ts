@@ -1,5 +1,6 @@
-/* eslint-disable no-console */
 import {Plan, Tile, OffscreenRequest, OffscreenResponse, SaveCroppedImage} from "./types";
+
+const DRAW_DEBUG_LINES = false;
 
 // Offscreen document to stitch tiles together
 
@@ -16,7 +17,7 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
 
     let currentY = 0;
     let scaleY = dpr;
-    let scaleX = dpr;
+    // let scaleX = dpr;
 
     for (let i = 0; i < tiles.length; i++) {
         const tile = tiles[i];
@@ -27,7 +28,7 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
         const isLast = i === tiles.length - 1;
         if (isFirst) {
             scaleY = img.height / innerHeight;
-            scaleX = img.width / window.innerWidth;
+            // scaleX = img.width / window.innerWidth;
         }
         const sY = isFirst ? 0 : headerHeight * scaleY;
         const sHeight = img.height - sY;
@@ -55,12 +56,19 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
         // Устанавливаем цвет заливки
         ctx.fillStyle = "red";
 
-        const lineY = dY + sHeight;
-        // Прямоугольник (x, y, width, height)
-        ctx.fillRect(0, lineY, img.width, 5);
-        ctx.fillRect(0, lineY+10, img.width, 5);
-        ctx.fillRect(0, lineY+20, img.width, 5);
-        ctx.fillRect(0, lineY+30, img.width, 5);
+        if (DRAW_DEBUG_LINES) {
+            const lineY = dY + sHeight;
+            // Прямоугольник (x, y, width, height)
+            ctx.fillRect(0, lineY, img.width, 5);
+            ctx.fillRect(0, lineY + 10, img.width, 5);
+            ctx.fillRect(0, lineY + 20, img.width, 5);
+            ctx.fillRect(0, lineY + 30, img.width, 5);
+            ctx.fillRect(0, lineY + 40, img.width, 5);
+            ctx.fillStyle = "yellow";
+            ctx.fillRect(0, lineY + 50, img.width, 5);
+            ctx.fillStyle = "blue";
+            ctx.fillRect(0, lineY + 55, img.width, 5);
+        }
 
         if (drawCroppedImage) {
             // Создаем временный canvas для сохранения обрезанного кадра
@@ -74,8 +82,17 @@ async function stitch(plan: Plan, tiles: Tile[], fileType: string, quality: numb
                 port.postMessage(msg_save);
             }
         }
-
-        currentY += sHeight - overlap * scaleY + sY + 200;
+        // const sY = isFirst ? 0 : headerHeight * scaleY;
+        // headerHeight=40 49,98035363
+        // overlap = 64 * 1.2495088408644401 = 79,96856582
+        // - 79,96856582   + 49,98035363 == -29,98821218
+        // first = - 79,96856582
+        // я заполнил на 60
+        const sY2 =  headerHeight * scaleY;
+        if (DRAW_DEBUG_LINES) {
+            currentY += sHeight - overlap * scaleY + sY + 35 * 4;
+        } else
+            currentY += sHeight - overlap * scaleY + sY2;
     }
 
     const blob = await canvas.convertToBlob({type: fileType, quality});
